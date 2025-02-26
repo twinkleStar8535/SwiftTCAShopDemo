@@ -8,26 +8,26 @@
 import SwiftUI
 import ComposableArchitecture
 
+
 struct AddToCartButton:View {
     
     let store:StoreOf<AddToCartDomain>
-
-    var body:some View {
+    
+    var body: some View {
         
-        if (store.count > 0) {
+        if (store.state.count > 0) {
             PlusButton(store: store)
-                .frame(height: 80)
         } else {
             Button {
                 store.send(.addCountWhenTapped)
             } label: {
-                Text("Add To Cart")
-                    .padding()
+                Text("Add to Cart")
+                    .padding(10)
                     .background(.blue)
-                    .foregroundStyle(.white)
-                    .frame(height: 80)
+                    .foregroundColor(.white)
                     .cornerRadius(10)
-            }
+            }.buttonStyle(.plain)
+            
         }
     }
     
