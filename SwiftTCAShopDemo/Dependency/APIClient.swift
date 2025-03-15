@@ -6,20 +6,28 @@
 //
 
 import Foundation
+import SwiftUI
 import ComposableArchitecture
 
+
+enum NetworkError:Error{
+    case decodeError
+    case responseError
+    case downloadError
+    
+    case uploadError
+    case deleteError
+}
 
 struct APIClient {
     // Fetch from Github Mock JSOn
     
-    var getAllDrinkFromCatrgory:@Sendable () async throws -> [ProductCategory]
-    
+    var getAllDrinks:@Sendable () async throws -> [DrinkCategory]
     // CRUD for Order => Airtable
     
-   //  var getAllDrinkFromCart:@Sendable () async throws -> [CartItem]
-   //  var addDrinkToCart:@Sendable () async throws -> [CartItem]
-   //  var editDrinkFromCart:@Sendable (CartItem) async throws -> [CartItem]
-   //  var deleteDrinkFromCart:@Sendable (CartItem) async throws -> [CartItem]
+     var sendDrinkOrder: @Sendable ([CartItem]) async throws -> ()
+     var fetchDrinkOrder:@Sendable () async throws -> [CartItem]
+     var deleteDrinkFromOrder:@Sendable (CartItem) async throws -> [CartItem]
 }
 
 extension DependencyValues {
@@ -30,137 +38,89 @@ extension DependencyValues {
 }
 
 extension APIClient:DependencyKey {
-    static let liveValue: APIClient = APIClient {
-        
+    static let liveValue: APIClient = APIClient(getAllDrinks: {
         do {
-            let (data,respsone) = try await URLSession.shared.data(from: URL(string: "https://raw.githubusercontent.com/twinkleStar8535/drinkMockData/main/drink.json")!)
+            let (data,response) = try await URLSession.shared.data(from: URL(string: "https://raw.githubusercontent.com/twinkleStar8535/drinkMockData/main/drink.json")!)
             
-            guard let responseStatus = (respsone as? HTTPURLResponse)?.statusCode,
+            guard let responseStatus = (response as? HTTPURLResponse)?.statusCode,
                   (200..<300).contains(responseStatus) else {
                 throw NetworkError.responseError
             }
             
-            guard let fullCategory = try? JSONDecoder().decode([ProductCategory].self, from: data) else {
+            guard let fullCategory = try? JSONDecoder().decode([DrinkCategory].self, from: data) else {
                 throw NetworkError.decodeError
             }
             
             return fullCategory
         } catch {
+            print("Download Error")
             throw NetworkError.downloadError
         }
-    }
-}
-
-
-
-/*
- import Foundation
- import ComposableArchitecture
-
- struct APIClient {
-     var getFullDrinkWithCategory: @Sendable () async throws -> ([ProductCategory])
- //    var getDrinkByCategory: @Sendable (String) async throws -> ([Product])
-     var sendFullOrder:  @Sendable ([Cart]) async throws -> String
-     var editOrder: @Sendable ([Cart]) async throws -> String
-     var deleteOrder: @Sendable ([Cart]) async throws -> String
- }
-
- //struct CartRecords: Codable {
- //    let records: [CartRecord]
- //}
- //
- //struct CartRecord: Codable {
- //    let fields: Cart
- //}
- //
- //struct Cart: Codable {
- //    var id: String
- //    var size: String
- //    var sugarUnit: String
- //    var drinkName: String
- //    var name: String
- //    var ice: String
- //    var prices: String
- //    var count: String
- //}
-
- extension APIClient:DependencyKey {
-     
-     static var liveValue: APIClient {
-         APIClient(getFullDrinkWithCategory: {
-             
-             do{
-                 let (data,_) = try await URLSession.shared.data(from: URL(string: "https://raw.githubusercontent.com/twinkleStar8535/drinkMockData/main/drink.json")!)
-                 
-                 guard let fullProductData = try? JSONDecoder().decode([ProductCategory].self, from: data) else {
-                     throw NetworkError.decodeError
-                 }
-                 
-                 
-                 return fullProductData
-                 
-             } catch {
-                 print("Can't fetch Drink List \(error)")
-                 throw NetworkError.downloadError
-             }
-             
-         }, sendFullOrder: { _ in
-             var sendOrderRequest = URLRequest(url: URL(string: "")!)
-             sendOrderRequest.httpMethod = "POST"
-             sendOrderRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-             
-             
-             return ""
-             
-         },editOrder: { _ in
-             var editOrderRequest = URLRequest(url: URL(string: "")!)
-             editOrderRequest.httpMethod = "PATCH"
-             editOrderRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-             
-             return ""
-         },deleteOrder: { _ in
-             var deleteOrderRequest = URLRequest(url: URL(string: "")!)
-             deleteOrderRequest.httpMethod = "DELETE"
-             deleteOrderRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-             return ""
-         })
-     }
-     
- }
-
- extension DependencyValues {
-     var apiClient:APIClient {
-         get { self[APIClient.self] }
-         set { self[APIClient.self] = newValue }
-     }
- }
-
-
- /*
-  getFullCategory: {
-      do{
-          var category:[String] = []
-          
-          let (data,_) = try await URLSession.shared.data(from: URL(string: "https://raw.githubusercontent.com/twinkleStar8535/drinkMockData/main/drink.json")!)
-          
-          guard let fullProductData = try? JSONDecoder().decode([ProductCategory].self, from: data) else {
-              throw NetworkError.decodeError
-          }
-          
-          for productData in fullProductData {
-              category.append(productData.category)
-          }
-          
-          return category
-      } catch {
-          print("Can't fetch Drink List \(error)")
-          throw NetworkError.downloadError
-      }
+    }, sendDrinkOrder: {sendItems in
         
-  }
-  
-  var getDrinkByCategory: @Sendable (String) async throws -> ([Product])
-
-  */
-
- */
+        
+        let cartRecords = sendItems.map { CartRecord(fields: $0) }
+        let cartRecordsRequest = CartRecords(records: cartRecords)
+    
+        let readySendItem = try JSONEncoder().encode(cartRecordsRequest)
+        
+        var urlRequest = URLRequest(url: URL(string: "https://api.airtable.com/v0/appMbNBmi4RxMRNIc/drinkOrder")!)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer pat9GXrJkAXQ1Y5Hs.62bc7af9d7cb94c00d47efdd2002d59399ecf000af06a8bdd8bf61797a37ac7f", forHTTPHeaderField: "Authorization")
+        
+        let (data,response) =  try await URLSession.shared.upload(for: urlRequest, from: readySendItem)
+        
+        print(response)
+        
+        guard let httpResponse = (response as? HTTPURLResponse) else {
+            print("Upload Error")
+            // For debugging
+            if let responseData = String(data: data, encoding: .utf8) {
+                print("Response: \(responseData)")
+            }
+            
+            throw NetworkError.uploadError
+        }
+        
+    }, fetchDrinkOrder: {
+        var urlRequest = URLRequest(url: URL(string: "https://api.airtable.com/v0/appMbNBmi4RxMRNIc/drinkOrder")!)
+        urlRequest.httpMethod = "GET"
+        urlRequest.setValue("Bearer pat9GXrJkAXQ1Y5Hs.62bc7af9d7cb94c00d47efdd2002d59399ecf000af06a8bdd8bf61797a37ac7f", forHTTPHeaderField: "Authorization")
+        var cartItems:[CartItem] = []
+        let (data,response) = try await URLSession.shared.data(for: urlRequest)
+        
+        guard let responseStatus = (response as? HTTPURLResponse)?.statusCode,
+              (200..<300).contains(responseStatus) else {
+            throw NetworkError.responseError
+        }
+        
+        guard let fullDrinkRecord = try? JSONDecoder().decode(CartRecords.self, from: data) else {
+            throw NetworkError.decodeError
+        }
+        
+        for record in fullDrinkRecord.records {
+            cartItems.append(record.fields)
+        }
+        
+        return cartItems
+    }, deleteDrinkFromOrder: { deleteItem in
+        var urlRequest = URLRequest(url: URL(string: "https://api.airtable.com/v0/appMbNBmi4RxMRNIc/drinkOrder/\(deleteItem.id)")!)
+        urlRequest.httpMethod = "DELETE"
+        urlRequest.setValue("Bearer pat9GXrJkAXQ1Y5Hs.62bc7af9d7cb94c00d47efdd2002d59399ecf000af06a8bdd8bf61797a37ac7f", forHTTPHeaderField: "Authorization")
+        
+        let (data,response) = try await URLSession.shared.data(for: urlRequest)
+        
+        guard let httpResponse = (response as? HTTPURLResponse) else {
+            print("Delete Error")
+            throw NetworkError.deleteError
+        }
+        
+        guard let fullDrinkOrder = try? JSONDecoder().decode([CartItem].self, from: data) else {
+            throw NetworkError.decodeError
+        }
+            
+        return fullDrinkOrder
+        
+    })
+}

@@ -6,12 +6,20 @@
 //
 
 import SwiftUI
+import ComposableArchitecture
 
 @main
 struct SwiftTCAShopDemoApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeView(store: .init(
+                initialState: HomeDomain.State(),
+                reducer: { HomeDomain()}
+            ),historyStore: .init(
+                initialState: CartHistoryDomain.State(id: UUID()),
+                reducer: { CartHistoryDomain()}
+            )
+           )
         }
     }
 }
