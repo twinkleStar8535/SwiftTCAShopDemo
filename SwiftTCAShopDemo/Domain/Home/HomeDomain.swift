@@ -19,24 +19,20 @@ struct HomeDomain {
         var selectedCategory: String = ""
         var allDrinkStorage: [DrinkCategory] = []
         
-        var cartCardItemsBox:IdentifiedArrayOf<CartItem> = []
-        
+        var cartCardItemsBox: IdentifiedArrayOf<CartItem> = []
         var drinkPricesMap: [UUID: (mPrice: Int?, lPrice: Int?)] = [:]
+        var path = StackState<CartModifyDomain.State>()
         
-         static func == (lhs: State, rhs: State) -> Bool {
-             lhs.showDrinkList == rhs.showDrinkList &&
-             lhs.fetchedCategory == rhs.fetchedCategory &&
-             lhs.selectedCategory == rhs.selectedCategory &&
-             lhs.allDrinkStorage == rhs.allDrinkStorage &&
-             lhs.cartCardItemsBox == rhs.cartCardItemsBox &&
-             lhs.cartEditState == rhs.cartEditState &&
-             lhs.cartListState == rhs.cartListState &&
-             lhs.cartHistoryState == rhs.cartHistoryState
-         }
+        static func == (lhs: State, rhs: State) -> Bool {
+            lhs.showDrinkList == rhs.showDrinkList &&
+            lhs.fetchedCategory == rhs.fetchedCategory &&
+            lhs.selectedCategory == rhs.selectedCategory &&
+            lhs.allDrinkStorage == rhs.allDrinkStorage &&
+            lhs.cartCardItemsBox == rhs.cartCardItemsBox &&
+            lhs.path == rhs.path
+        }
         
         @Presents var cartEditState: CartEditDomain.State?
-        @Presents var cartListState: CartModifyDomain.State?
-        @Presents var cartHistoryState: CartHistoryDomain.State?
     }
     
     enum Action: Equatable {
@@ -44,15 +40,11 @@ struct HomeDomain {
         case startFetchDrink
         case fetchAllDrink(TaskResult<[DrinkCategory]>)
         case loopEachDrink(IdentifiedActionOf<DrinkDomain>)
-        
         case selectCategory(String)
         case filterDrinks(String)
-        
         case setCartOrderBy(PresentationAction<CartEditDomain.Action>)
-        
-        case setCartListBy(PresentationAction<CartModifyDomain.Action>)
         case prepareCartListState
-        case sendCartListStateToHome(CartModifyDomain.State)
+        case path(StackActionOf<CartModifyDomain>)
     }
     
     @Dependency(\.apiClient) var apiClient
@@ -61,26 +53,35 @@ struct HomeDomain {
     var body: some Reducer<State, Action> {
         Reduce { state, action in
             switch action {
+                // MARK: 首頁飲料顯示
             case .startFetchDrink, .fetchAllDrink, .selectCategory, .filterDrinks:
                 return presentHomeDrink(state: &state, action: action)
                 
+                // MARK: 跳轉至下單頁顯示資料
             case .setCartOrderBy(.presented(.initCartBy(let drink))):
                 return presentInitCartOrder(state: &state, drink: drink)
                 
+                // MARK: 每筆下單頁確認後的結果,從子頁面透過 delegate 方式傳回來處理加入到總訂單的資料
             case .setCartOrderBy(.presented(.delegate(.addToListItems(let item)))):
-                
                 let drink = state.allDrinkStorage.flatMap { $0.drinks }.first { $0.name == item.drinkName }
                 return handleAddToListItems(state: &state, item: item, mPrice: drink?.prices.mPrice, lPrice: drink?.prices.lPrice)
 
             case .prepareCartListState:
                 return prepareCartListState(state: &state)
              
-            case .setCartListBy(.presented(.delegate(.cleanSendItems))):
-                return cleanCartAndPrepareState(state: &state)
-            case .sendCartListStateToHome(let cartListState):
-                state.cartListState = cartListState
+            case .path(.element(id: _, action: .delegate(.cleanSendItems))):
+                state.cartCardItemsBox.removeAll()
+                state.drinkPricesMap.removeAll()
+                state.path.removeAll()
                 return .none
-            case .loopEachDrink, .setCartOrderBy, .setCartListBy:
+                
+            case .loopEachDrink:
+                return .none
+                
+            case .setCartOrderBy:
+                return .none
+                
+            case .path:
                 return .none
             }
         }
@@ -90,41 +91,12 @@ struct HomeDomain {
         .ifLet(\.$cartEditState, action: \.setCartOrderBy) {
             CartEditDomain()
         }
-        .ifLet(\.$cartListState, action: \.setCartListBy) {
+        .forEach(\.path, action: \.path) {
             CartModifyDomain()
         }
     }
     
-    private func prepareCartListState(state: inout State) -> Effect<Action> {
-        let cartItems = state.cartCardItemsBox.map { item in
-            let prices = state.drinkPricesMap[item.id] ?? (nil, nil)
-
-            var cartItem = item
-            cartItem.soldMPrice = prices.mPrice
-            cartItem.soldLPrice = prices.lPrice
-
-            return CartItemDomain.State(
-                id: item.id,
-                cartItem: cartItem,
-                mPrice: prices.mPrice,
-                lPrice: prices.lPrice
-            )
-        }
-
-        let cartListState = CartModifyDomain.State(
-            id: uuid(),
-            sendItems: IdentifiedArrayOf(uniqueElements: cartItems)
-        )
-
-        return .send(.sendCartListStateToHome(cartListState))
-    }
-    
-    private func cleanCartAndPrepareState(state: inout State) -> Effect<Action> {
-        state.cartCardItemsBox.removeAll()
-        let cartListState = CartModifyDomain.State(id: uuid(), sendItems: IdentifiedArrayOf())
-        return .send(.sendCartListStateToHome(cartListState))
-    }
-    
+    // MARK: 處理開啟App 首頁飲料顯示
     private func presentHomeDrink(state: inout State, action: Action) -> Effect<Action> {
         switch action {
         case .startFetchDrink:
@@ -156,18 +128,6 @@ struct HomeDomain {
         default:
             return .none
         }
-    }
-    
-    private func presentInitCartOrder(state: inout State, drink: Drink) -> Effect<Action> {
-        state.cartEditState = self.initializeCartEditState(drink: drink)
-        return .none
-    }
-    
-    private func handleAddToListItems(state: inout State, item: CartItem, mPrice: Int?, lPrice: Int?) -> Effect<Action> {
-        state.cartCardItemsBox.append(item)
-        state.drinkPricesMap[item.id] = (mPrice, lPrice)
-        state.cartEditState = nil
-        return .none
     }
     
     private func handleFetchAllDrinkSuccess(state: inout State, fullDrinks: [DrinkCategory]) -> Effect<Action> {
@@ -211,7 +171,14 @@ struct HomeDomain {
         return .none
     }
     
-    func initializeCartEditState(drink: Drink) -> CartEditDomain.State {
+    // MARK: 處理跳轉至下單頁顯示資料
+    
+    private func presentInitCartOrder(state: inout State, drink: Drink) -> Effect<Action> {
+        state.cartEditState = self.initializeCartEditState(drink: drink)
+        return .none
+    }
+    
+    private func initializeCartEditState(drink: Drink) -> CartEditDomain.State {
         var initSize: SizeUnit = .M
         var price = 0
 
@@ -241,5 +208,40 @@ struct HomeDomain {
         state.lPrice = drink.prices.lPrice
         
         return state
+    }
+    
+    
+    // MARK: 這邊使用 cartCardItemsBox蒐集 全部下訂的紀錄, 跟mapping 飲料價格, 另外上一個頁面編輯已完成要先將state 清為 nil
+    private func handleAddToListItems(state: inout State, item: CartItem, mPrice: Int?, lPrice: Int?) -> Effect<Action> {
+        state.cartCardItemsBox.append(item)
+        state.drinkPricesMap[item.id] = (mPrice, lPrice)
+        state.cartEditState = nil
+        return .none
+    }
+
+    
+    private func prepareCartListState(state: inout State) -> Effect<Action> {
+        let cartItems = state.cartCardItemsBox.map { item in
+            let prices = state.drinkPricesMap[item.id] ?? (nil, nil)
+
+            var cartItem = item
+            cartItem.soldMPrice = prices.mPrice
+            cartItem.soldLPrice = prices.lPrice
+
+            return CartItemDomain.State(
+                id: item.id,
+                cartItem: cartItem,
+                mPrice: prices.mPrice,
+                lPrice: prices.lPrice
+            )
+        }
+
+        let cartListState = CartModifyDomain.State(
+            id: uuid(),
+            sendItems: IdentifiedArrayOf(uniqueElements: cartItems)
+        )
+
+        state.path.append(cartListState)
+        return .none
     }
 }

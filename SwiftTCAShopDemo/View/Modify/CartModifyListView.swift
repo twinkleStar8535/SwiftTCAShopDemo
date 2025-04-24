@@ -12,7 +12,7 @@ import ComposableArchitecture
 
 struct CartModifyListView: View {
     @Bindable var store: StoreOf<CartModifyDomain>
-    var onDismiss: () -> Void 
+//    var onDismiss: () -> Void 
 
     var body: some View {
         VStack {
@@ -27,6 +27,7 @@ struct CartModifyListView: View {
             checkoutSection
         }
         .background(.main)
+        .alert($store.scope(state: \.alert, action: \.alert))
     }
     
     private var cartItemsList: some View {
@@ -78,9 +79,9 @@ struct CartModifyListView: View {
             
             Button(action: {
                 store.send(.sendOrder)
-                if !store.sendItems.isEmpty {
-                    onDismiss()
-                 }
+//                if !store.sendItems.isEmpty {
+//                    onDismiss()
+//                 }
             }) {
                 Text("送出訂單")
                     .font(Font.custom("jf-openhuninn-2.1", size: 18))
@@ -111,5 +112,5 @@ struct CartModifyListView: View {
       )
     ) , reducer: {
         CartModifyDomain()
-    }),onDismiss: {})
+    }))
 }

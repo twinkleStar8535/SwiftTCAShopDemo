@@ -17,22 +17,10 @@ struct HomeView: View {
 
     
     var body: some View {
-        NavigationStack {
+        NavigationStackStore(store.scope(state: \.path, action: \.path)) {
             mainContent
-                .navigationDestination(isPresented: $showingCartList) {
-                    if let cartListState = store.cartListState {
-                        CartModifyListView(
-                            store: Store(
-                                initialState: cartListState,
-                                reducer: { CartModifyDomain() }
-                            ),
-                            onDismiss: {
-                                store.send(.setCartListBy(.presented(.delegate(.cleanSendItems))))
-                                showingCartList = false
-                            }
-                        )
-                    }
-                }
+        } destination: { store in
+            CartModifyListView(store: store)
         }
         .accentColor(.white)
         .sheet(item: $store.scope(state: \.cartEditState, action: \.setCartOrderBy)) { cartEditDomain in
@@ -40,6 +28,7 @@ struct HomeView: View {
                 CartEditView(store: cartEditDomain)
             }
         }
+    
     }
     
     private var mainContent: some View {
@@ -53,7 +42,6 @@ struct HomeView: View {
         .overlay(alignment: .bottomTrailing, content: {
             Button {
                 store.send(.prepareCartListState)
-                showingCartList = true
             } label: {
                 FloatCartView().overlay {
                     (store.cartCardItemsBox.count > 0 ? Badge(count: store.cartCardItemsBox.count) : nil)
@@ -64,8 +52,6 @@ struct HomeView: View {
         })
         .background(Color("MainColor"))
     }
-    
-
     
     private var headerView: some View {
         HStack(alignment: .center) {

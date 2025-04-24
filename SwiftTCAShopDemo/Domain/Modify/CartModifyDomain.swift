@@ -17,7 +17,7 @@ struct CartModifyDomain {
     struct State: Equatable, Identifiable {
         var id: UUID
         var sendItems: IdentifiedArrayOf<CartItemDomain.State>
-        
+        @Presents var alert: AlertState<Action.Alert>?
         var totalOrderPrice: Int {
             sendItems.reduce(0) { total, itemState in
                 total + (itemState.cartItem.price * itemState.cartItem.quantity)
@@ -34,15 +34,19 @@ struct CartModifyDomain {
         case updateTempUnit(id: UUID, temp: TempUnit)
         case updateSize(id: UUID, size: SizeUnit, price: Int)
         case delegate(Delegate)
+        case alert(PresentationAction<Alert>)
         
         enum Delegate: Equatable {
             case cleanSendItems
+        }
+        enum Alert: Equatable {
+            case emptyCart
+            case zeroQuantity
         }
     }
     
     @Dependency(\.apiClient) var apiClient
     @Dependency(\.dismiss) var dismiss
-    @Dependency(\.isPresented) var isPresented
     
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -54,18 +58,45 @@ struct CartModifyDomain {
                 return .none
                 
             case .sendOrder:
-
-                guard !state.sendItems.isEmpty else {
+                if state.sendItems.isEmpty {
+                    state.alert = AlertState(title: {
+                        TextState("通知")
+                    },actions: {
+                        ButtonState(role: .cancel) {
+                            TextState("啊呀我迷糊了!")
+                        }
+                    },message: {
+                        TextState("購物車完全沒東西")
+                    })
                     return .none
                 }
                 
-                let sendItems = state.sendItems.map { cartDomain in
-                    return cartDomain.cartItem
-                }
-                
-                return .run { send in
-                    try await apiClient.sendDrinkOrder(sendItems)
-                    await send(.delegate(.cleanSendItems))
+                if state.sendItems.contains(where: { $0.cartItem.quantity == 0 }) {
+                    
+                    state.alert = AlertState(title: {
+                        TextState("通知")
+                    },actions: {
+                        ButtonState(role: .cancel) {
+                            TextState("喔喔喔好! 我去補")
+                        }
+                    },message: {
+                        TextState("有商品數量為0，請調整數量")
+                    })
+                    
+                    return .none
+                    
+                } else {
+                    
+                    let sendItems = state.sendItems.map { cartDomain in
+                        return cartDomain.cartItem
+                    }
+                    
+                    return .run { send in
+                        try await apiClient.sendDrinkOrder(sendItems)
+                        await send(.delegate(.cleanSendItems))
+                        await self.dismiss()
+                    }
+                    
                 }
                 
             case .updateCartItem(let id, let quantity):
@@ -95,7 +126,11 @@ struct CartModifyDomain {
                 
             case .delegate:
                 return .none
+                
+            case .alert:
+                return .none
             }
         }
+        .ifLet(\.alert, action: \.alert)
     }
 }
